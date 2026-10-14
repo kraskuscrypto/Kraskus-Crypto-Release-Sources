@@ -1,0 +1,79 @@
+diff --git a/configure.ac b/configure.ac
+index 5c3bfe55..823ade84 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -56,6 +56,9 @@ if test x$YASM = xyes; then
+ 		fi
+ 	fi
+ fi
++rorx=
++avx1=
++sse4=
+ AM_CONDITIONAL([HAVE_AVX2], [test x$rorx = xavx2])
+ AM_CONDITIONAL([HAVE_AVX1], [test x$avx1 = xavx])
+ AM_CONDITIONAL([HAVE_SSE4], [test x$sse4 = xsse4_1])
+diff --git a/src/ckpool.c b/src/ckpool.c
+index 3e67a92e..4e3ffa6e 100644
+--- a/src/ckpool.c
++++ b/src/ckpool.c
+@@ -1473,6 +1473,7 @@ static void parse_config(ckpool_t *ckp)
+ 	json_get_string(&ckp->logdir, json_conf, "logdir");
+ 	json_get_int(&ckp->maxclients, json_conf, "maxclients");
+ 	json_get_double(&ckp->donation, json_conf, "donation");
++	json_get_string(&ckp->donaddress, json_conf, "donaddress");
+ 	/* Avoid dust-sized donations */
+ 	if (ckp->donation < 0.1)
+ 		ckp->donation = 0;
+@@ -1748,7 +1749,8 @@ int main(int argc, char **argv)
+ 			ckp.btcdpass[i] = strdup("pass");
+ 	}
+ 
+-	ckp.donaddress = "bc1q5gq32mvu3cltkcw2sx9nyc5udx3zy0gt82002c";
++	if (!ckp.donaddress)
++		ckp.donaddress = "bc1q5gq32mvu3cltkcw2sx9nyc5udx3zy0gt82002c";
+ 
+ 	/* Donations on testnet are meaningless but required for complete
+ 	 * testing. Testnet and regtest addresses */
+diff --git a/src/stratifier.c b/src/stratifier.c
+index 6a476635..d7f664c8 100644
+--- a/src/stratifier.c
++++ b/src/stratifier.c
+@@ -5655,7 +5655,7 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double d
+ 	mutex_lock(&ckp_sdata->uastats_lock);
+ 	if (valid) {
+ 		ckp_sdata->stats.unaccounted_shares++;
+-		ckp_sdata->stats.unaccounted_diff_shares += MAX(1, diff);
++		ckp_sdata->stats.unaccounted_diff_shares += diff;
+ 	} else
+ 		ckp_sdata->stats.unaccounted_rejects += MAX(1, diff);
+ 	mutex_unlock(&ckp_sdata->uastats_lock);
+@@ -6957,7 +6957,7 @@ static void parse_remote_share(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
+ 
+ 	mutex_lock(&sdata->uastats_lock);
+ 	sdata->stats.unaccounted_shares++;
+-	sdata->stats.unaccounted_diff_shares += MAX(1, diff);
++	sdata->stats.unaccounted_diff_shares += diff;
+ 	mutex_unlock(&sdata->uastats_lock);
+ 
+ 	worker->shares += MAX(1, diff);
+@@ -8230,9 +8230,10 @@ static void *statsupdate(void *arg)
+ 
+ 		/* Round to 4 significant digits */
+ 		percent = round(stats->accounted_diff_shares * 10000 / stats->network_diff) / 100;
+-		JSON_CPACK(val, "{sf,sf,sf,sf,sf,sf,sf,sf,sf}",
++		JSON_CPACK(val, "{sf,sf,sf,sf,sf,sf,sf,sf,sf,sf}",
+ 			        "diff", percent,
+ 				"accepted", stats->accounted_diff_shares,
++                                "accepted_shares", stats->accounted_shares,
+ 				"rejected", stats->accounted_rejects,
+ 				"bestshare", stats->best_diff,
+ 				"SPS1m", stats->sps1,
+@@ -8314,7 +8315,7 @@ static void *statsupdate(void *arg)
+ 		/* Update stats 32 times per minute to divide up userstats,
+ 		 * displaying status every minute. */
+ 		for (i = 0; i < 32; i++) {
+-			int64_t unaccounted_shares,
++			double unaccounted_shares,
+ 				unaccounted_diff_shares,
+ 				unaccounted_rejects;
+ 

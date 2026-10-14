@@ -1,0 +1,43 @@
+diff --git a/src/stratifier.c b/src/stratifier.c
+index 6a476635..d7f664c8 100644
+--- a/src/stratifier.c
++++ b/src/stratifier.c
+@@ -5655,7 +5655,7 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double d
+ 	mutex_lock(&ckp_sdata->uastats_lock);
+ 	if (valid) {
+ 		ckp_sdata->stats.unaccounted_shares++;
+-		ckp_sdata->stats.unaccounted_diff_shares += MAX(1, diff);
++		ckp_sdata->stats.unaccounted_diff_shares += diff;
+ 	} else
+ 		ckp_sdata->stats.unaccounted_rejects += MAX(1, diff);
+ 	mutex_unlock(&ckp_sdata->uastats_lock);
+@@ -6957,7 +6957,7 @@ static void parse_remote_share(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
+ 
+ 	mutex_lock(&sdata->uastats_lock);
+ 	sdata->stats.unaccounted_shares++;
+-	sdata->stats.unaccounted_diff_shares += MAX(1, diff);
++	sdata->stats.unaccounted_diff_shares += diff;
+ 	mutex_unlock(&sdata->uastats_lock);
+ 
+ 	worker->shares += MAX(1, diff);
+@@ -8230,9 +8230,10 @@ static void *statsupdate(void *arg)
+ 
+ 		/* Round to 4 significant digits */
+ 		percent = round(stats->accounted_diff_shares * 10000 / stats->network_diff) / 100;
+-		JSON_CPACK(val, "{sf,sf,sf,sf,sf,sf,sf,sf,sf}",
++		JSON_CPACK(val, "{sf,sf,sf,sf,sf,sf,sf,sf,sf,sf}",
+ 			        "diff", percent,
+ 				"accepted", stats->accounted_diff_shares,
++                                "accepted_shares", stats->accounted_shares,
+ 				"rejected", stats->accounted_rejects,
+ 				"bestshare", stats->best_diff,
+ 				"SPS1m", stats->sps1,
+@@ -8314,7 +8315,7 @@ static void *statsupdate(void *arg)
+ 		/* Update stats 32 times per minute to divide up userstats,
+ 		 * displaying status every minute. */
+ 		for (i = 0; i < 32; i++) {
+-			int64_t unaccounted_shares,
++			double unaccounted_shares,
+ 				unaccounted_diff_shares,
+ 				unaccounted_rejects;
+ 

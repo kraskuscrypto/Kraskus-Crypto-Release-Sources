@@ -1,0 +1,5 @@
+# Provenance — `ghcr.io/kraskuscrypto/kraskus-chta-ckpool:0.2.34-dev15`
+
+This image has no OCI labels. Its config history records only the final stage (the libzmq3-dev runtime install, `COPY /build/src/ckpool /bin/ckpool`, `COPY /build/COPYING ...`, `ENTRYPOINT ["/bin/ckpool"]`), which matches this recipe's final stage. The image was created 2026-09-19 14:02:44 UTC; the recipe was committed 2026-09-19 14:13 UTC (8350d0f, "Add required CHTA coinbase developer fee"). A build-host scratch copy of the same recipe (2026-09-19 13:49 UTC) differs only in its configure.ac step (a `host_cpu` substitution that matches nothing in upstream configure.ac). The shipped binary contains no SSE4 SHA-256 assembly symbols, which matches this recipe's portable-build step and not the scratch copy (whose build would have kept the host-native assembly). Source-level markers in the binary agree: configurable `donaddress`, `accepted_shares`, upstream testnet donation fallback present, no Kraskus fee guard, no `rejected_shares`.
+
+Confidence: high (inferred from the binary and the dated recipe; not a reproducible-build proof).

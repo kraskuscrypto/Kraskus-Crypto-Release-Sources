@@ -1,0 +1,73 @@
+diff --git a/src/stratifier.c b/src/stratifier.c
+index b13dee4..381d8b6 100644
+--- a/src/stratifier.c
++++ b/src/stratifier.c
+@@ -73,6 +73,9 @@ struct pool_stats {
+ 	double accounted_diff_shares;
+ 	double unaccounted_rejects;
+ 	double accounted_rejects;
++	/* Kraskus: rejected submissions as a count (rejects above are diff weighted) */
++	double unaccounted_reject_shares;
++	double accounted_reject_shares;
+ 
+ 	/* Diff shares per second for 1/5/15... minute rolling averages */
+ 	double dsps1;
+@@ -3637,6 +3640,7 @@ static void reset_bestshares(sdata_t *sdata)
+ 	sdata->stats.accounted_diff_shares =
+ 	sdata->stats.accounted_shares =
+ 	sdata->stats.accounted_rejects = 0;
++	sdata->stats.accounted_reject_shares = 0;
+ 	sdata->stats.best_diff = 0;
+ 
+ 	ck_rlock(&sdata->instance_lock);
+@@ -5656,8 +5660,10 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double d
+ 	if (valid) {
+ 		ckp_sdata->stats.unaccounted_shares++;
+ 		ckp_sdata->stats.unaccounted_diff_shares += diff;
+-	} else
++	} else {
+ 		ckp_sdata->stats.unaccounted_rejects += MAX(1, diff);
++		ckp_sdata->stats.unaccounted_reject_shares++;
++	}
+ 	mutex_unlock(&ckp_sdata->uastats_lock);
+ 
+ 	/* Count only accepted and stale rejects in diff calculation. */
+@@ -8230,11 +8236,12 @@ static void *statsupdate(void *arg)
+ 
+ 		/* Round to 4 significant digits */
+ 		percent = round(stats->accounted_diff_shares * 10000 / stats->network_diff) / 100;
+-		JSON_CPACK(val, "{sf,sf,sf,sf,sf,sf,sf,sf,sf,sf}",
++		JSON_CPACK(val, "{sf,sf,sf,sf,sf,sf,sf,sf,sf,sf,sf}",
+ 			        "diff", percent,
+ 				"accepted", stats->accounted_diff_shares,
+                                 "accepted_shares", stats->accounted_shares,
+ 				"rejected", stats->accounted_rejects,
++				"rejected_shares", stats->accounted_reject_shares,
+ 				"bestshare", stats->best_diff,
+ 				"SPS1m", stats->sps1,
+ 				"SPS5m", stats->sps5,
+@@ -8318,6 +8325,7 @@ static void *statsupdate(void *arg)
+ 			double unaccounted_shares,
+ 				unaccounted_diff_shares,
+ 				unaccounted_rejects;
++			double unaccounted_reject_shares;
+ 
+ 			ts_to_tv(&diff, &stats->last_update);
+ 			cksleep_ms_r(&stats->last_update, 1875);
+@@ -8331,6 +8339,8 @@ static void *statsupdate(void *arg)
+ 			unaccounted_shares = stats->unaccounted_shares;
+ 			unaccounted_diff_shares = stats->unaccounted_diff_shares;
+ 			unaccounted_rejects = stats->unaccounted_rejects;
++			unaccounted_reject_shares = stats->unaccounted_reject_shares;
++			stats->unaccounted_reject_shares = 0;
+ 			stats->unaccounted_shares =
+ 			stats->unaccounted_diff_shares =
+ 			stats->unaccounted_rejects = 0;
+@@ -8340,6 +8350,7 @@ static void *statsupdate(void *arg)
+ 			stats->accounted_shares += unaccounted_shares;
+ 			stats->accounted_diff_shares += unaccounted_diff_shares;
+ 			stats->accounted_rejects += unaccounted_rejects;
++			stats->accounted_reject_shares += unaccounted_reject_shares;
+ 
+ 			decay_time(&stats->sps1, unaccounted_shares, per_tdiff, MIN1);
+ 			decay_time(&stats->sps5, unaccounted_shares, per_tdiff, MIN5);

@@ -1,0 +1,140 @@
+diff --git a/configure.ac b/configure.ac
+index 5c3bfe55..823ade84 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -56,6 +56,9 @@ if test x$YASM = xyes; then
+ 		fi
+ 	fi
+ fi
++rorx=
++avx1=
++sse4=
+ AM_CONDITIONAL([HAVE_AVX2], [test x$rorx = xavx2])
+ AM_CONDITIONAL([HAVE_AVX1], [test x$avx1 = xavx])
+ AM_CONDITIONAL([HAVE_SSE4], [test x$sse4 = xsse4_1])
+diff --git a/src/ckpool.c b/src/ckpool.c
+index 3e67a92e..8a191d46 100644
+--- a/src/ckpool.c
++++ b/src/ckpool.c
+@@ -1473,6 +1473,7 @@ static void parse_config(ckpool_t *ckp)
+ 	json_get_string(&ckp->logdir, json_conf, "logdir");
+ 	json_get_int(&ckp->maxclients, json_conf, "maxclients");
+ 	json_get_double(&ckp->donation, json_conf, "donation");
++	json_get_string(&ckp->donaddress, json_conf, "donaddress");
+ 	/* Avoid dust-sized donations */
+ 	if (ckp->donation < 0.1)
+ 		ckp->donation = 0;
+@@ -1748,12 +1749,13 @@ int main(int argc, char **argv)
+ 			ckp.btcdpass[i] = strdup("pass");
+ 	}
+ 
+-	ckp.donaddress = "bc1q5gq32mvu3cltkcw2sx9nyc5udx3zy0gt82002c";
++	if (!ckp.donaddress)
++		ckp.donaddress = "bc1q5gq32mvu3cltkcw2sx9nyc5udx3zy0gt82002c";
+ 
+ 	/* Donations on testnet are meaningless but required for complete
+ 	 * testing. Testnet and regtest addresses */
+-	ckp.tndonaddress = "tb1q5fyv7tue73y4zxezh2c685qpwx0cfngfxlrgxh";
+-	ckp.rtdonaddress = "bcrt1qlk935ze2fsu86zjp395uvtegztrkaezawxx0wf";
++	ckp.tndonaddress = ckp.donaddress;
++	ckp.rtdonaddress = ckp.donaddress;
+ 
+ 	if (!ckp.btcaddress && !ckp.btcsolo && !ckp.proxy)
+ 		quit(0, "Non solo mining must have a btcaddress in config, aborting!");
+diff --git a/src/stratifier.c b/src/stratifier.c
+index 6a476635..381d8b6e 100644
+--- a/src/stratifier.c
++++ b/src/stratifier.c
+@@ -73,6 +73,9 @@ struct pool_stats {
+ 	double accounted_diff_shares;
+ 	double unaccounted_rejects;
+ 	double accounted_rejects;
++	/* Kraskus: rejected submissions as a count (rejects above are diff weighted) */
++	double unaccounted_reject_shares;
++	double accounted_reject_shares;
+ 
+ 	/* Diff shares per second for 1/5/15... minute rolling averages */
+ 	double dsps1;
+@@ -3637,6 +3640,7 @@ static void reset_bestshares(sdata_t *sdata)
+ 	sdata->stats.accounted_diff_shares =
+ 	sdata->stats.accounted_shares =
+ 	sdata->stats.accounted_rejects = 0;
++	sdata->stats.accounted_reject_shares = 0;
+ 	sdata->stats.best_diff = 0;
+ 
+ 	ck_rlock(&sdata->instance_lock);
+@@ -5655,9 +5659,11 @@ static void add_submit(ckpool_t *ckp, stratum_instance_t *client, const double d
+ 	mutex_lock(&ckp_sdata->uastats_lock);
+ 	if (valid) {
+ 		ckp_sdata->stats.unaccounted_shares++;
+-		ckp_sdata->stats.unaccounted_diff_shares += MAX(1, diff);
+-	} else
++		ckp_sdata->stats.unaccounted_diff_shares += diff;
++	} else {
+ 		ckp_sdata->stats.unaccounted_rejects += MAX(1, diff);
++		ckp_sdata->stats.unaccounted_reject_shares++;
++	}
+ 	mutex_unlock(&ckp_sdata->uastats_lock);
+ 
+ 	/* Count only accepted and stale rejects in diff calculation. */
+@@ -6957,7 +6963,7 @@ static void parse_remote_share(ckpool_t *ckp, sdata_t *sdata, json_t *val, const
+ 
+ 	mutex_lock(&sdata->uastats_lock);
+ 	sdata->stats.unaccounted_shares++;
+-	sdata->stats.unaccounted_diff_shares += MAX(1, diff);
++	sdata->stats.unaccounted_diff_shares += diff;
+ 	mutex_unlock(&sdata->uastats_lock);
+ 
+ 	worker->shares += MAX(1, diff);
+@@ -8230,10 +8236,12 @@ static void *statsupdate(void *arg)
+ 
+ 		/* Round to 4 significant digits */
+ 		percent = round(stats->accounted_diff_shares * 10000 / stats->network_diff) / 100;
+-		JSON_CPACK(val, "{sf,sf,sf,sf,sf,sf,sf,sf,sf}",
++		JSON_CPACK(val, "{sf,sf,sf,sf,sf,sf,sf,sf,sf,sf,sf}",
+ 			        "diff", percent,
+ 				"accepted", stats->accounted_diff_shares,
++                                "accepted_shares", stats->accounted_shares,
+ 				"rejected", stats->accounted_rejects,
++				"rejected_shares", stats->accounted_reject_shares,
+ 				"bestshare", stats->best_diff,
+ 				"SPS1m", stats->sps1,
+ 				"SPS5m", stats->sps5,
+@@ -8314,9 +8322,10 @@ static void *statsupdate(void *arg)
+ 		/* Update stats 32 times per minute to divide up userstats,
+ 		 * displaying status every minute. */
+ 		for (i = 0; i < 32; i++) {
+-			int64_t unaccounted_shares,
++			double unaccounted_shares,
+ 				unaccounted_diff_shares,
+ 				unaccounted_rejects;
++			double unaccounted_reject_shares;
+ 
+ 			ts_to_tv(&diff, &stats->last_update);
+ 			cksleep_ms_r(&stats->last_update, 1875);
+@@ -8330,6 +8339,8 @@ static void *statsupdate(void *arg)
+ 			unaccounted_shares = stats->unaccounted_shares;
+ 			unaccounted_diff_shares = stats->unaccounted_diff_shares;
+ 			unaccounted_rejects = stats->unaccounted_rejects;
++			unaccounted_reject_shares = stats->unaccounted_reject_shares;
++			stats->unaccounted_reject_shares = 0;
+ 			stats->unaccounted_shares =
+ 			stats->unaccounted_diff_shares =
+ 			stats->unaccounted_rejects = 0;
+@@ -8339,6 +8350,7 @@ static void *statsupdate(void *arg)
+ 			stats->accounted_shares += unaccounted_shares;
+ 			stats->accounted_diff_shares += unaccounted_diff_shares;
+ 			stats->accounted_rejects += unaccounted_rejects;
++			stats->accounted_reject_shares += unaccounted_reject_shares;
+ 
+ 			decay_time(&stats->sps1, unaccounted_shares, per_tdiff, MIN1);
+ 			decay_time(&stats->sps5, unaccounted_shares, per_tdiff, MIN5);
+@@ -8615,7 +8627,7 @@ void *stratifier(void *arg)
+ 			sdata->dontxnlen = address_to_txn(sdata->dontxnbin, ckp->donaddress, ckp->donscript, ckp->donsegwit);
+ 			LOGNOTICE("BTC regtest donation address valid %s", ckp->donaddress);
+ 		} else
+-			LOGNOTICE("No valid donation address found");
++			{ if (ckp->donation > 0) quit(1, "Kraskus: developer-fee address %s is invalid; refusing to mine with the fee disabled", ckp->donaddress); LOGNOTICE("No valid donation address found"); }
+ 	}
+ 
+ 	randomiser = time(NULL);
