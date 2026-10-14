@@ -19,8 +19,8 @@ Kraskus development repository and contains only material that a release needs.
 ## Kraskus components
 
 The Kraskus application layer (UI, API/adapter, controller, supervisors and
-packaging) is **not** published or licensed by this repository. Nothing here
-grants any licence to Kraskus proprietary components.
+packaging) is proprietary software of 4KM Ventures LLC and is **not** published
+here. It is licensed only under [`LICENSE-KRASKUS.md`](LICENSE-KRASKUS.md).
 
 Kraskus modifications to a third-party component are published here under that
 component's own licence (for CKPool: GPL-3.0-only).
