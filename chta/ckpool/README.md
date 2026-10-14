@@ -24,3 +24,4 @@ image-to-source mapping.
 The Kraskus CKPool **supervisor** script that some images also contain
 (`/usr/local/bin/kraskus-ckpool-supervisor`) is a separate Kraskus program that
 starts and stops CKPool; it is not part of CKPool and is not covered here.
+See [`SUPERVISOR.md`](SUPERVISOR.md) for why it is a separate program.
