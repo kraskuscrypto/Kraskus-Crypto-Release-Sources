@@ -1,0 +1,97 @@
+# Quai Solo by Kraskus: go-quai node image.
+#
+# go-quai v0.56.1 (commit 5917bf5e2ced1d3f1cafdde6bc6fa3345fb71c3e), GPL-3.0,
+# built UNMODIFIED from the upstream source. Kraskus adds only this build
+# recipe and the launcher script (node/quai-node-entrypoint.sh).
+# The exact corresponding source of every released image is published per
+# release (licenses/go-quai/SOURCE.md; `build.sh --source-bundle DIR`).
+#
+# Build context (prepared by build.sh):
+#   go-quai-5917bf5e.tar           `git archive --format=tar` of the pinned commit
+#                                  (deterministic; SHA-256 pinned below and in build.sh)
+#   quai-node-entrypoint.sh        Kraskus launcher + storage guard
+#   SOURCE.md                      corresponding-source directions
+ARG GO_IMAGE=golang:1.24.9-alpine3.22@sha256:8f8959f38530d159bf71d0b3eb0c547dc61e7959d8225d1599cf762477384923
+ARG RUNTIME_IMAGE=alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+
+FROM ${GO_IMAGE} AS builder
+ARG GO_QUAI_TAR_SHA256=4ff7dae5cc9f20d0bd9e18de9748763548cd20af67dfcbc942f8602d2f39ad50
+RUN apk add --no-cache make gcc musl-dev tar
+WORKDIR /src
+COPY go-quai-5917bf5e.tar /tmp/go-quai.tar
+RUN echo "${GO_QUAI_TAR_SHA256}  /tmp/go-quai.tar" | sha256sum -c - \
+ && tar -xf /tmp/go-quai.tar -C /src \
+ && rm /tmp/go-quai.tar \
+ && test "$(cat VERSION)" = "v0.56.1"
+ENV GOTOOLCHAIN=local CGO_ENABLED=1 GOMODCACHE=/go/pkg/mod GOFLAGS=-mod=mod
+# Module mode, every module verified against go.sum. (A vendored build is not
+# possible: `go mod vendor` drops the C sources of cgo dependencies such as
+# libsecp256k1.) The module cache's download zips are exactly the dependency
+# sources the binary is compiled from; the source-bundle stage publishes them.
+RUN go mod download && go mod verify
+# build/ci.go passes -trimpath to the real build itself.
+RUN make go-quai && ./build/bin/go-quai --help >/dev/null
+# Licence and notice files of every module in the build list, kept by module path.
+RUN mkdir -p /licenses/deps \
+ && go list -deps -f '{{with .Module}}{{.Path}} {{.Version}} {{.Dir}}{{end}}' ./cmd/go-quai | sort -u > /licenses/deps/modules.txt \
+ && while read -r path version dir; do \
+      [ -n "$dir" ] && [ "$dir" != "/src" ] || continue; \
+      find "$dir" -maxdepth 1 -type f \( -iname 'licen[cs]e*' -o -iname 'copying*' -o -iname 'notice*' \
+        -o -iname 'patents*' -o -iname 'unlicense*' \) | while read -r f; do \
+        mkdir -p "/licenses/deps/$path@$version"; cp "$f" "/licenses/deps/$path@$version/"; \
+      done; \
+    done < /licenses/deps/modules.txt \
+ && test "$(find /licenses/deps -type f | wc -l)" -gt 10
+
+# GPL-3.0 corresponding source of the binary: the upstream tree exactly as
+# compiled plus the module-cache download zips of every dependency (each
+# verified against go.sum), as deterministic tarballs. Rebuild offline with:
+#   GOMODCACHE=$PWD/gomodcache GOFLAGS=-mod=mod GOPROXY=off make go-quai
+FROM builder AS source-pack
+RUN rm -rf /src/build/bin /src/build/_workspace \
+ && tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C / -cf /go-quai-v0.56.1-5917bf5e-source.tar src \
+ && gzip -n -9 /go-quai-v0.56.1-5917bf5e-source.tar \
+ && mkdir -p /pack/gomodcache/cache \
+ && cp -a /go/pkg/mod/cache/download /pack/gomodcache/cache/download \
+ && rm -rf /pack/gomodcache/cache/download/sumdb \
+ && tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C /pack -cf /go-quai-v0.56.1-5917bf5e-gomodcache.tar gomodcache \
+ && gzip -n -9 /go-quai-v0.56.1-5917bf5e-gomodcache.tar \
+ && cp /licenses/deps/modules.txt /go-quai-v0.56.1-5917bf5e-modules.txt
+FROM scratch AS source-bundle
+COPY --from=source-pack /go-quai-v0.56.1-5917bf5e-source.tar.gz /go-quai-v0.56.1-5917bf5e-gomodcache.tar.gz /go-quai-v0.56.1-5917bf5e-modules.txt /
+
+FROM ${RUNTIME_IMAGE}
+ARG GO_QUAI_COMMIT=5917bf5e2ced1d3f1cafdde6bc6fa3345fb71c3e
+ARG APP_VERSION
+ARG SOURCE_REVISION
+RUN test -n "$APP_VERSION" && echo "$APP_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' && test -n "$SOURCE_REVISION"
+RUN apk add --no-cache ca-certificates curl tini \
+ && addgroup -g 1000 quai && adduser -D -u 1000 -G quai -h /home/quai quai \
+ && mkdir -p /data /opt/go-quai/params /usr/share/licenses/go-quai \
+ && chown quai:quai /data
+COPY --from=builder /src/build/bin/go-quai /opt/go-quai/go-quai
+COPY --from=builder /src/VERSION /opt/go-quai/VERSION
+COPY --from=builder /src/params/genesis_alloc.json /opt/go-quai/params/genesis_alloc.json
+COPY --from=builder /src/params/forfeiture_addresses.json /opt/go-quai/params/forfeiture_addresses.json
+COPY --from=builder /src/LICENSE /usr/share/licenses/go-quai/LICENSE
+COPY --from=builder /licenses/deps /usr/share/licenses/go-quai/deps
+COPY SOURCE.md /usr/share/licenses/go-quai/SOURCE.md
+COPY quai-node-entrypoint.sh /usr/local/bin/quai-node-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/quai-node-entrypoint.sh /opt/go-quai/go-quai
+LABEL org.opencontainers.image.title="kraskus-quai-node" \
+      org.opencontainers.image.description="go-quai v0.56.1 (unmodified) for Quai Solo by Kraskus" \
+      org.opencontainers.image.licenses="GPL-3.0-only" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}" \
+      org.opencontainers.image.source="https://github.com/kraskuscrypto/Kraskus-Crypto-Release-Sources" \
+      network.kraskus.upstream.repository="https://github.com/dominant-strategies/go-quai" \
+      network.kraskus.upstream.tag="v0.56.1" \
+      network.kraskus.upstream.commit="${GO_QUAI_COMMIT}"
+USER quai
+# go-quai resolves params/*.json and nodelogs/ relative to its working
+# directory; the launcher switches to /data/run (writable) first.
+WORKDIR /opt/go-quai
+VOLUME ["/data"]
+EXPOSE 4002/tcp 4002/udp 1936 1937 1938
+STOPSIGNAL SIGINT
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/quai-node-entrypoint.sh"]

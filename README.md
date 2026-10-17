@@ -13,6 +13,7 @@ Kraskus development repository and contains only material that a release needs.
 | Path | Contents |
 |---|---|
 | [`chta/ckpool/`](chta/ckpool/) | Complete corresponding source (GPL-3.0-only) for every published `kraskus-chta-ckpool` image |
+| [`quai/go-quai/`](quai/go-quai/) | Complete corresponding source (GPL-3.0) of go-quai, unmodified, for every published `kraskus-5trat-quai-node` image |
 | [`apps/`](apps/) | Third-party component and notice records for each Kraskus app release |
 | [`third-party-licenses/`](third-party-licenses/) | Full licence texts of the bundled third-party components, pinned to the shipped versions |
 
