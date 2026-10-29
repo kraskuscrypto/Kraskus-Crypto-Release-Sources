@@ -40,4 +40,4 @@ The released images ship only the binaries of the third-party components; the Bi
 - Repository `kraskuscrypto/Kraskus-Mining-Platform` (private), branch `v3/btc`, path `apps/btc-solo/` (full review history kept).
 - Reviewed commits: app `4b968fc`, UI and node `e7bf79f`, release preparation `b272422`.
 
-Recipe of this release: https://github.com/kraskuscrypto/Kraskus-Crypto-Dev-Store/tree/4e3c46a/kraskus-btc-solo (Kraskus Crypto Dev Store, development preview)
+Recipe of this release: https://github.com/kraskuscrypto/Kraskus-Crypto-Dev-Store/tree/c3c89a8/kraskus-btc-solo (Kraskus Crypto Dev Store main, development preview; squash of reviewed entry 4e3c46a, content identical)
